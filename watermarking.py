@@ -1,86 +1,71 @@
-import numpy as np
 import cv2
+import numpy as np
 
-# Function to generate recovery watermark for homogeneous blocks
-def generate_homogeneous_watermark(block):
-    average_pixel_value = np.mean(block)
-    watermark = np.binary_repr(int(average_pixel_value), width=8)
-    return watermark
+# Function to divide the image into blocks
+def divide_blocks(image, min_block_size):
+    height, width = image.shape[:2]
 
-def generate_non_homogeneous_watermark(sub_block):
-    # Calculate the high six-bit average value of the sub-block
-    average_value = np.mean(sub_block)
-    high_six_bits = np.binary_repr(int(average_value), width=6)
+    # Check if the image dimensions are less than the minimum block size
+    if height <= min_block_size or width <= min_block_size:
+        # If the image size is less than or equal to the minimum block size,
+        # it's considered a homogeneous block
+        return [(0, 0, height, width)], []
 
-    # Generate sub-category encoding (dummy implementation)
-    # Here, we're just using the binary representation of the sum of pixel values
-    sub_category_encoding = np.binary_repr(int(np.sum(sub_block)), width=5)
+    # Calculate the number of blocks along height and width
+    num_blocks_h = height // min_block_size
+    num_blocks_w = width // min_block_size
 
-    # Calculate the difference between the sum of the maximum two pixels
-    # and the sum of another two pixels with uniform quantization
-    sorted_pixels = np.sort(sub_block.flatten())
-    max_two_sum = sorted_pixels[-1] + sorted_pixels[-2]
-    other_two_sum = sorted_pixels[0] + sorted_pixels[1]
-    difference = np.abs(max_two_sum - other_two_sum)
-    difference_encoding = np.binary_repr(int(difference), width=2)
+    # Initialize lists to store homogeneous and non-homogeneous blocks
+    homogeneous_blocks = []
+    non_homogeneous_blocks = []
 
-    # Combine the three parts to form the 11-bit feature information
-    watermark = high_six_bits + sub_category_encoding + difference_encoding
+    # Iterate through each block
+    for i in range(num_blocks_h):
+        for j in range(num_blocks_w):
+            # Calculate block coordinates
+            start_h = i * min_block_size
+            end_h = min(start_h + min_block_size, height)
+            start_w = j * min_block_size
+            end_w = min(start_w + min_block_size, width)
 
-    return watermark
+            # Extract the block from the image
+            block = image[start_h:end_h, start_w:end_w]
 
-# Function to embed recovery watermark into image
-def embed_watermark(image):
-    # Perform decomposition, sorting, grouping, and other necessary steps
-    # For simplicity, let's assume the image is already divided into blocks
-    block_size = 4
-    for i in range(0, image.shape[0], block_size):
-        for j in range(0, image.shape[1], block_size):
-            block = image[i:i+block_size, j:j+block_size]
-            # Check if block is homogeneous or non-homogeneous
+            # Check if the block is homogeneous
             if is_homogeneous(block):
-                watermark = generate_homogeneous_watermark(block)
+                homogeneous_blocks.append((start_h, start_w, end_h, end_w))
             else:
-                sub_blocks = divide_into_sub_blocks(block)
-                watermark = ''
-                for sub_block in sub_blocks:
-                    watermark += generate_non_homogeneous_watermark(sub_block)
-            # Embed watermark into block using specified algorithm
-            embed_watermark_into_block(block, watermark)
-            # Update image with embedded watermark
-            image[i:i+block_size, j:j+block_size] = block
-    return image
+                # Recursively divide non-homogeneous blocks
+                sub_homogeneous_blocks, sub_non_homogeneous_blocks = divide_blocks(block, min_block_size)
+                # Adjust coordinates relative to the original image
+                adjusted_sub_homogeneous_blocks = [(start_h + sub_start_h, start_w + sub_start_w,
+                                                    start_h + sub_end_h, start_w + sub_end_w)
+                                                   for sub_start_h, sub_start_w, sub_end_h, sub_end_w in sub_homogeneous_blocks]
+                adjusted_sub_non_homogeneous_blocks = [(start_h + sub_start_h, start_w + sub_start_w,
+                                                        start_h + sub_end_h, start_w + sub_end_w)
+                                                       for sub_start_h, sub_start_w, sub_end_h, sub_end_w in sub_non_homogeneous_blocks]
+                homogeneous_blocks.extend(adjusted_sub_homogeneous_blocks)
+                non_homogeneous_blocks.extend(adjusted_sub_non_homogeneous_blocks)
 
-# Function to check if block is homogeneous
+    return homogeneous_blocks, non_homogeneous_blocks
+
+# Function to check if a block is homogeneous
 def is_homogeneous(block):
-    # Example implementation, replace with actual algorithm
-    # Dummy implementation based on threshold
-    threshold = 10  # Adjust threshold as needed
-    return np.max(block) - np.min(block) < threshold
+    # Here, you can implement your method to check for homogeneity
+    # For example, you can calculate the standard deviation of pixel values
+    # and compare it with a threshold to determine if the block is homogeneous
+    # For simplicity, let's consider a block homogeneous if all pixel values are the same
+    return np.all(block == block[0, 0])
 
-# Function to divide block into sub-blocks
-def divide_into_sub_blocks(block):
-    # Example implementation, replace with actual algorithm
-    # Dummy implementation dividing block into four equal sub-blocks
-    sub_blocks = []
-    for i in range(0, block.shape[0], 2):
-        for j in range(0, block.shape[1], 2):
-            sub_blocks.append(block[i:i+2, j:j+2])
-    return sub_blocks
+# Load an image
+image = cv2.imread('sample_image.jpg', cv2.IMREAD_GRAYSCALE)
 
-# Function to embed watermark into block
-def embed_watermark_into_block(block, watermark):
-    # Example implementation, replace with actual embedding algorithm
-    # Dummy implementation embedding watermark into block
-    pass
+# Minimum block size (4x4)
+min_block_size = 4
 
-# Load image
-image = cv2.imread('input_image.jpg', cv2.IMREAD_GRAYSCALE)
+# Divide the image into blocks
+homogeneous_blocks, non_homogeneous_blocks = divide_blocks(image, min_block_size)
 
-# Normalize image (if needed)
-
-# Embed watermark
-watermarked_image = embed_watermark(image)
-
-# Save watermarked image
-cv2.imwrite('watermarked_image.jpg', watermarked_image)
+# Display the results
+print("Number of homogeneous blocks:", len(homogeneous_blocks))
+print("Number of non-homogeneous blocks:", len(non_homogeneous_blocks))
