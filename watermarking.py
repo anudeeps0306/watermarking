@@ -26,6 +26,47 @@ def normalize_image(image, alpha, beta, delta, phi):
 
     return normalized_image
 
+def categorize_blocks(image, homogeneous_blocks, threshold=10):
+    """
+    Categorize image blocks into 'smooth' or 'texture' categories.
+
+    Parameters:
+        image: numpy array, input grayscale image
+        homogeneous_blocks: list, stores information about homogeneous blocks
+        threshold: float, intensity difference threshold for splitting
+
+    Returns:
+        smooth_blocks: list, contains positions of smooth blocks
+        texture_blocks: list, contains positions of texture blocks
+    """
+    smooth_blocks = []
+    texture_blocks = []
+    block_id = 0  # Initial block ID
+
+    block_size = min(image.shape[0], image.shape[1])
+
+    # Iterate through the image and categorize each 4x4 block
+    for y in range(0, block_size, 4):
+        for x in range(0, block_size, 4):
+            # Check if the 4x4 block is homogeneous or not
+            block_homogeneous = False
+            for block in homogeneous_blocks:
+                bx, by, size, _ = block
+                if x >= bx and y >= by and x < bx + size and y < by + size:
+                    block_homogeneous = True
+                    break
+
+            if block_homogeneous:
+                smooth_blocks.append((x, y, block_id))
+            else:
+                texture_blocks.append((x, y, block_id))
+
+            # Increment the block ID for the next block
+            block_id += 1
+
+    return smooth_blocks, texture_blocks
+
+
 
 def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_y=0, block_size=None, position=0, homogeneous_blocks=[], non_homogeneous_blocks=[]):
     """
@@ -76,21 +117,47 @@ def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_
 
     return homogeneous_blocks, non_homogeneous_blocks
 
+
+
 # Load the image
-image = cv2.imread('1.jpeg', cv2.IMREAD_GRAYSCALE)
+image = cv2.imread('lenna2.png', cv2.IMREAD_GRAYSCALE)
 
 # Check if the image is loaded
 if image is None:
     print('Could not open or find the image')
 else:
     # Define parameters
-    threshold = 10  # Intensity difference threshold
+    threshold = 100  # Intensity difference threshold
     min_block_size = 4  # Minimum block size
+
+    # Calculate the nearest dimensions that are divisible by 4 up to a maximum size
+    max_size = 1024  # Maximum size for precalculation
+    valid_sizes = [4 * i for i in range(1, max_size // 4 + 1)]
+
+    # Get the dimensions of the image
+    height, width = image.shape
+    best_size = min(valid_sizes, key=lambda x: abs(x - height) + abs(x - width))
+
+    print('Best size:', best_size)
+    print('height:', height)
+    print('width:', width)
+
+    # Resize the image to the nearest calculated dimensions
+    image = cv2.resize(image, (1024, 1024))
 
     # Perform quadtree decomposition
     homogeneous_blocks, non_homogeneous_blocks = quadtree_decomposition(image, threshold, min_block_size)
 
+    # Categorize blocks
+    smooth_blocks, texture_blocks = categorize_blocks(image, homogeneous_blocks)
+
     # Create an image view
+
+    for i in range(0,len(image)):
+        for j in range(0,len(image[0])):
+            image[i][j] = 0
+
+
     image_view = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
     # Draw homogeneous blocks in green and non-homogeneous blocks in red
@@ -98,13 +165,44 @@ else:
         x, y, size, _ = block
         cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 255, 0), 1)
 
-    for block in non_homogeneous_blocks:
-        x, y, size, _ = block
-        cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 0, 255), 1)
+    # for block in non_homogeneous_blocks:
+    #     x, y, size, _ = block 
+    #     cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 0, 255), 1)
+
+
+    # # Color homogeneous blocks in green and non-homogeneous blocks in red
+    # for block in homogeneous_blocks:
+    #     x, y, size, _ = block
+    #     image_view[y:y+size, x:x+size] = (0, 255, 0)  # Green
+
+    # for block in non_homogeneous_blocks:
+    #     x, y, size, _ = block
+    #     image_view[y:y+size, x:x+size] = (0, 0, 255)  # Red
+
+
+    # for block in smooth_blocks:
+    #     x,y,_ = block
+    #     size = 4
+    #     cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 255, 0), 1)
+
+    # for block in texture_blocks:
+    #     x,y,_ = block
+    #     size = 4
+    #     cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 0, 255), 1)
+
+
+    # for block in non_homogeneous_blocks:
+    #     print(block)
+
+    
 
 
     print(len(homogeneous_blocks))
     print(len(non_homogeneous_blocks))
+
+    print(len(smooth_blocks))
+    print(len(texture_blocks))
+
 
     # Display the image view
     cv2.imshow('Image View', image_view)
