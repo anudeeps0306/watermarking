@@ -26,13 +26,12 @@ def normalize_image(image, alpha, beta, delta, phi):
 
     return normalized_image
 
-def categorize_blocks(image, homogeneous_blocks, threshold=10):
+def categorize_blocks(image , threshold=10):
     """
     Categorize image blocks into 'smooth' or 'texture' categories.
 
     Parameters:
         image: numpy array, input grayscale image
-        homogeneous_blocks: list, stores information about homogeneous blocks
         threshold: float, intensity difference threshold for splitting
 
     Returns:
@@ -50,11 +49,8 @@ def categorize_blocks(image, homogeneous_blocks, threshold=10):
         for x in range(0, block_size, 4):
             # Check if the 4x4 block is homogeneous or not
             block_homogeneous = False
-            for block in homogeneous_blocks:
-                bx, by, size, _ = block
-                if x >= bx and y >= by and x < bx + size and y < by + size:
-                    block_homogeneous = True
-                    break
+            if max(image[y:y + 4, x:x + 4].flatten()) - min(image[y:y + 4, x:x + 4].flatten()) <= threshold:
+                block_homogeneous = True
 
             if block_homogeneous:
                 smooth_blocks.append((x, y, block_id))
@@ -68,7 +64,10 @@ def categorize_blocks(image, homogeneous_blocks, threshold=10):
 
 
 
-def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_y=0, block_size=None, position=0, homogeneous_blocks=[], non_homogeneous_blocks=[]):
+position = 0
+
+def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_y=0, block_size=None, homogeneous_blocks=[], non_homogeneous_blocks=[]):
+    global position
     """
     Perform quadtree decomposition on the image.
 
@@ -80,7 +79,6 @@ def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_
         start_x: int, starting x-coordinate of the block
         start_y: int, starting y-coordinate of the block
         block_size: int, size of the block
-        position: int, position of the block
         homogeneous_blocks: list, stores information about homogeneous blocks
         non_homogeneous_blocks: list, stores information about non-homogeneous blocks
 
@@ -91,6 +89,7 @@ def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_
         block_size = min(image.shape[0], image.shape[1])
 
     if block_size <= min_block_size:
+        position+=1
         if max(image[start_y:start_y + block_size, start_x:start_x + block_size].flatten()) - min(image[start_y:start_y + block_size, start_x:start_x + block_size].flatten()) <= threshold:
             homogeneous_blocks.append((start_x, start_y, block_size, position))
         else:
@@ -108,11 +107,12 @@ def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_
         max_intensity_diff = max(sub_image.max() - sub_image.min() for sub_image in sub_images)
 
         if max_intensity_diff > threshold:
-            quadtree_decomposition(image, threshold, min_block_size, start_x, start_y, sub_block_size, position * 4 + 1, homogeneous_blocks, non_homogeneous_blocks)
-            quadtree_decomposition(image, threshold, min_block_size, start_x + sub_block_size, start_y, sub_block_size, position * 4 + 2, homogeneous_blocks, non_homogeneous_blocks)
-            quadtree_decomposition(image, threshold, min_block_size, start_x, start_y + sub_block_size, sub_block_size, position * 4 + 3, homogeneous_blocks, non_homogeneous_blocks)
-            quadtree_decomposition(image, threshold, min_block_size, start_x + sub_block_size, start_y + sub_block_size, sub_block_size, position * 4 + 4, homogeneous_blocks, non_homogeneous_blocks)
+            quadtree_decomposition(image, threshold, min_block_size, start_x, start_y, sub_block_size, homogeneous_blocks, non_homogeneous_blocks)
+            quadtree_decomposition(image, threshold, min_block_size, start_x + sub_block_size, start_y, sub_block_size, homogeneous_blocks, non_homogeneous_blocks)
+            quadtree_decomposition(image, threshold, min_block_size, start_x, start_y + sub_block_size, sub_block_size, homogeneous_blocks, non_homogeneous_blocks)
+            quadtree_decomposition(image, threshold, min_block_size, start_x + sub_block_size, start_y + sub_block_size, sub_block_size, homogeneous_blocks, non_homogeneous_blocks)
         else:
+            position+=1
             homogeneous_blocks.append((start_x, start_y, block_size, position))
 
     return homogeneous_blocks, non_homogeneous_blocks
@@ -120,7 +120,7 @@ def quadtree_decomposition(image, threshold, min_block_size=4, start_x=0, start_
 
 
 # Load the image
-image = cv2.imread('lenna2.png', cv2.IMREAD_GRAYSCALE)
+image = cv2.imread('1.jpeg', cv2.IMREAD_GRAYSCALE)
 
 # Check if the image is loaded
 if image is None:
@@ -143,27 +143,53 @@ else:
     print('width:', width)
 
     # Resize the image to the nearest calculated dimensions
-    image = cv2.resize(image, (1024, 1024))
+    image = cv2.resize(image, (256, 256))
 
     # Perform quadtree decomposition
     homogeneous_blocks, non_homogeneous_blocks = quadtree_decomposition(image, threshold, min_block_size)
 
     # Categorize blocks
-    smooth_blocks, texture_blocks = categorize_blocks(image, homogeneous_blocks)
+    smooth_blocks, texture_blocks = categorize_blocks(image, threshold)
 
     # Create an image view
 
-    for i in range(0,len(image)):
-        for j in range(0,len(image[0])):
-            image[i][j] = 0
+    # for i in range(0,len(image)):
+    #     for j in range(0,len(image[0])):
+    #         image[i][j] = 0
 
 
     image_view = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
-    # Draw homogeneous blocks in green and non-homogeneous blocks in red
+
+    # Create a new array to store block positions
+    position_matrix = np.zeros_like(image, dtype=int)
+
+    # Populate the position matrix with the position values of homogeneous and non-homogeneous blocks
+
+    print(homogeneous_blocks[0])
     for block in homogeneous_blocks:
-        x, y, size, _ = block
-        cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 255, 0), 1)
+        x, y, size, position = block
+        for i in range(x,x+size):
+            for j in range(y,y+size):
+                position_matrix[j][i] = position
+
+    for block in non_homogeneous_blocks:
+        x, y, size, position = block
+        for i in range(x,x+size):
+            for j in range(y,y+size):
+                position_matrix[j][i] = position
+
+    for i in range(1,50):
+        for j in range(1,50):
+            print(position_matrix[i][j] , end=" ")
+        print(end="\n")
+
+    # # Draw homogeneous blocks in green and non-homogeneous blocks in red
+    # for block in homogeneous_blocks:
+    #     x, y, size, _ = block
+    #     cv2.rectangle(image_view, (x, y), (x + size, y + size), (0, 255, 0), 1)
+
+    
 
     # for block in non_homogeneous_blocks:
     #     x, y, size, _ = block 
@@ -194,6 +220,23 @@ else:
     # for block in non_homogeneous_blocks:
     #     print(block)
 
+
+    mapping_smooth = {}
+    mapping_texture = {}
+
+    for smooth_block in smooth_blocks:
+        x, y, position = smooth_block
+        mapping_smooth[position] = position_matrix[x][y]
+
+    for texture_block in mapping_texture:
+        x, y, position = texture_block
+        mapping_texture[position] = position_matrix[x][y]
+
+    
+    print(mapping_smooth)
+
+    
+
     
 
 
@@ -204,7 +247,7 @@ else:
     print(len(texture_blocks))
 
 
-    # Display the image view
-    cv2.imshow('Image View', image_view)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # # Display the image view
+    # cv2.imshow('Image View', image_view)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()

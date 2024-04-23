@@ -1,41 +1,57 @@
-import cv2
+def decompose_image(self, image):
+  """
+  Decomposes an image into multiple scales based on homogeneity criterion.
 
-# Load the image
-image = cv2.imread('1.jpeg', cv2.IMREAD_GRAYSCALE)
+  Args:
+      image: A numpy array representing the image.
 
-# Check if the image is loaded
-if image is None:
-    print('Could not open or find the image')
-else:
-    # Define parameters
-    threshold = 10  # Intensity difference threshold
-    min_block_size = 4  # Minimum block size
+  Returns:
+      A list of lists containing decomposed image blocks.
+  """
+  # Check if image size is divisible by 4 for minimum block size requirement
+  if image.shape[0] % 4 != 0 or image.shape[1] % 4 != 0:
+    # Extend image with zeros to meet the requirement
+    padded_image = np.pad(image, ((0, (4 - image.shape[0] % 4) // 2),
+                                  ((0, (4 - image.shape[1] % 4) // 2))), mode='constant')
+  else:
+    padded_image = image
 
-    # Calculate the nearest dimensions that are divisible by 4 up to a maximum size
-    max_size = 1024  # Maximum size for precalculation
-    valid_sizes = [4 * i for i in range(1, max_size // 4 + 1)]
+  # Recursive function to decompose image blocks
+  def decompose_block(block, level):
+    """
+    Decomposes a single image block based on homogeneity criterion.
 
-    # Get the dimensions of the image
-    height, width = image.shape
-    best_size = min(valid_sizes, key=lambda x: abs(x - height) + abs(x - width))
+    Args:
+        block: A numpy array representing the image block.
+        level: The current decomposition level.
 
-    print('Best size:', best_size)
-    print('height:', height)
-    print('width:', width)
+    Returns:
+        A list containing decomposed blocks or the original block if homogeneous.
+    """
+    # Calculate average gray value
+    average_gray = np.mean(block)
 
-    # Resize the image to the nearest calculated dimensions
-    image = cv2.resize(image, (best_size, best_size))
+    # Define homogeneity criterion threshold
+    threshold = (np.max(block) - 1) * 0.1  # Assuming gamma=0.1 here
 
-    # # Perform quadtree decomposition
-    # homogeneous_blocks, non_homogeneous_blocks = quadtree_decomposition(image, threshold, min_block_size)
+    # Check if block meets homogeneity criterion
+    if np.all(np.abs(block - average_gray) <= threshold):
+      return [block]  # Block is homogeneous, return as-is
 
-    # # Categorize blocks
-    # smooth_blocks, texture_blocks = categorize_blocks(image, homogeneous_blocks)
+    # Split block into sub-blocks
+    half_height, half_width = block.shape[0] // 2, block.shape[1] // 2
+    sub_blocks = [
+        decompose_block(block[:half_height, :half_width], level + 1),
+        decompose_block(block[:half_height, half_width:], level + 1),
+        decompose_block(block[half_height:, :half_width], level + 1),
+        decompose_block(block[half_height:, half_width:], level + 1),
+    ]
 
-    # Create an image view
-    image_view = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    # Flatten the list of sub-blocks (recursive case)
+    return [item for sublist in sub_blocks for item in sublist]
 
-    # Display the image view
-    cv2.imshow('Image View', image_view)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+  # Start decomposition from the entire image
+  decomposed_blocks = decompose_block(padded_image, 1)
+
+  # Return the decomposed image blocks
+  return decomposed_blocks
