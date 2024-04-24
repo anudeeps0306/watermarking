@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+# import pyldpc
+
 
 position = 1
 
@@ -333,6 +335,8 @@ class WatermarkEmbeddingAlgorithm:
         watermarked_image = self.image.copy()
         mapping = {}
 
+        index = 0
+
         # Iterate over each homogeneous block
         for hom_block_info in homogeneous_blocks:
             hom_start_x, hom_start_y, hom_block_size, position = hom_block_info
@@ -342,31 +346,41 @@ class WatermarkEmbeddingAlgorithm:
             average_value = int(np.mean(hom_block))
 
             # Convert the average value to an 8-bit binary string
-            binary_string = format(average_value, '08b')
+            binary_string = format(average_value & 0xFF, '08b')
 
-            # Implement BCH encoding (placeholder)
-            bch_encoded = binary_string * 3
-            # Find a suitable smooth block to embed the watermark
-            for smooth_block_info in smooth_blocks:
-                smooth_start_x, smooth_start_y, smooth_block_size,_ = smooth_block_info
-                smooth_block = watermarked_image[smooth_start_y:smooth_start_y + smooth_block_size, smooth_start_x:smooth_start_x + smooth_block_size]
+            data_bits = binary_string[:8]
+            parity_bits = binary_string[8:]
 
-                # Check if the smooth block has enough space to embed the watermark
-                if len(bch_encoded) <= smooth_block.size:
-                    # Embed the watermark into the smooth block
-                    watermarked_block = self.embed_watermark_into_block(smooth_block, bch_encoded)
+            # Define LDPC code parameters
+            n = 15  # Length of codeword
+            k = 8   # Number of message bits
+            d_v = 7  # Variable node degree
+            d_c = 3  # Check node degree
 
-                    # Update the watermarked image with the embedded watermark
-                    watermarked_image[smooth_start_y:smooth_start_y + smooth_block_size, smooth_start_x:smooth_start_x + smooth_block_size] = watermarked_block
+            # # Generate LDPC parity-check matrix
+            # H, _, _ = pyldpc.make_ldpc(n, d_v, d_c, systematic=True, sparse=True)
 
-                    # Keep track of the mapping between homogeneous and smooth blocks
-                    mapping[position] = (smooth_start_x, smooth_start_y)
+            # # Create LDPC code object
+            # ldpc_code = pyldpc.code(H)
 
-                    break  # Break the loop after embedding the watermark
+            # # Encode data bits using LDPC encoding
+            # encoded_data = ldpc_code.encode(data_bits.astype(int))
+
+            # Combine data and parity bits into a single string
+            # watermark_bits = ''.join(str(bit) for bit in encoded_data) + parity_bits
+
+            # Update mapping dictionary
+            mapping[position] = smooth_blocks[index][3]
+
+            # Embed the watermark into the smooth block
+            self.embed_watermark_into_block(watermarked_image,smooth_blocks[index], binary_string)
+            
+            index+=1
+
 
         return watermarked_image, mapping
 
-    def embed_watermark_into_block(self, block, watermark):
+    def embed_watermark_into_block(self, watermarked_image, block_info, watermark):
         """
         Embeds the watermark into the given block.
 
@@ -377,23 +391,31 @@ class WatermarkEmbeddingAlgorithm:
         Returns:
             watermarked_block: A copy of the block with the watermark embedded.
         """
-        watermarked_block = block.copy()
 
-        # Embed the watermark into the block (e.g., LSB embedding)
-        # For demonstration purposes, let's just fill the block with a constant value
+        start_x, start_y, block_size, _ = block_info
+
         watermark_length = len(watermark)
         watermark_index = 0
 
-        for i in range(watermarked_block.shape[0]):
-            for j in range(watermarked_block.shape[1]):
+        for i in range(start_y, start_y + block_size):
+            for j in range(start_x, start_x + block_size):
                 if watermark_index < watermark_length:
-                    watermark_list = [int(char) if char.isdigit() else 0 for char in watermark]
-                    watermarked_block[i, j] = watermark_list[watermark_index]
+                    # Convert the pixel value to binary string
+                    # binary_pixel = format(watermarked_image[i, j], '08b')
+
+                    binary_pixel = watermarked_image[i, j]
+
+
+                    # Replace the LSB with the watermark bit
+                    binary_pixel = binary_pixel[:-1]
+
+                    # Convert the modified binary string back to integer
+                    # watermarked_image[i, j] = int(binary_pixel, 2)
+
                     watermark_index += 1
                 else:
                     break
 
-        return watermarked_block
     
 
     def embed_watermark_non_homogeneous(self, non_homogeneous_blocks, texture_blocks, image):
@@ -410,6 +432,7 @@ class WatermarkEmbeddingAlgorithm:
         """
         watermarked_image = image.copy()
         mapping = {}
+        index = 0
 
         # Iterate over each non-homogeneous block
         for non_hom_block_info in non_homogeneous_blocks:
@@ -421,19 +444,21 @@ class WatermarkEmbeddingAlgorithm:
 
             # Find a suitable texture block to embed the watermark
             for texture_block_info in texture_blocks:
-                texture_start_x, texture_start_y, texture_block_size,_ = texture_block_info
+                texture_start_x, texture_start_y, texture_block_size,position1 = texture_block_info
                 texture_block = watermarked_image[texture_start_y:texture_start_y + texture_block_size, texture_start_x:texture_start_x + texture_block_size]
 
                 # Check if the texture block has enough space to embed the watermark
                 if len(feature_info) <= texture_block.size:
                     # Embed the watermark into the texture block
-                    watermarked_block = self.embed_watermark_into_block(texture_block, feature_info)
+                    # watermarked_block = self.embed_watermark_into_block(watermarked_image,texture_block, feature_info)
 
                     # Update the watermarked image with the embedded watermark
-                    watermarked_image[texture_start_y:texture_start_y + texture_block_size, texture_start_x:texture_start_x + texture_block_size] = watermarked_block
+                    # watermarked_image[texture_start_y:texture_start_y + texture_block_size, texture_start_x:texture_start_x + texture_block_size] = watermarked_block
 
                     # Keep track of the mapping between non-homogeneous and texture blocks
-                    mapping[position] = (texture_start_x, texture_start_y)
+                    mapping[position] = position1
+
+                    index+=1
 
                     break  # Break the loop after embedding the watermark
 
