@@ -192,22 +192,254 @@ class WatermarkEmbeddingAlgorithm:
         # You can add them as separate steps based on your specific watermarking scheme
 
         return homogeneous_watermarks, non_homogeneous_watermarks
+    
+    def check_homogeneity(self, block, threshold=10):
+        """
+        Check if a given block is homogeneous based on the intensity difference threshold.
 
-    def divide_into_sub_blocks(self):
-        # Divide the normalized image into non-overlapping sub-blocks
-        pass
+        Args:
+            block: A numpy array representing the image block.
+            threshold: Intensity difference threshold for determining homogeneity.
 
-    def calculate_entropy(self):
-        # Calculate entropy for each sub-block
-        pass
+        Returns:
+            bool: True if the block is homogeneous, False otherwise.
+        """
+        max_intensity_diff = np.max(block) - np.min(block)
+        return max_intensity_diff <= threshold
+    
+
+
+    def divide_and_categorize_blocks(self, image, threshold=10):
+        """
+        Divide the normalized image into 4x4 sub-blocks and categorize them as homogeneous or non-homogeneous.
+
+        Args:
+            image: A numpy array representing the normalized grayscale image.
+            threshold: Intensity difference threshold for determining homogeneity.
+
+        Returns:
+            smooth_blocks: List of tuples containing information about smooth blocks (start_x, start_y, block_size).
+            texture_blocks: List of tuples containing information about texture blocks (start_x, start_y, block_size).
+        """
+        smooth_blocks = []
+        texture_blocks = []
+        position = 0
+        # Calculate number of 4x4 sub-blocks in each dimension
+        num_blocks_x = image.shape[1] // 4
+        num_blocks_y = image.shape[0] // 4
+
+        # Iterate through each 4x4 sub-block
+        for y in range(num_blocks_y):
+            for x in range(num_blocks_x):
+                start_x = x * 4
+                start_y = y * 4
+                sub_block = image[start_y:start_y+4, start_x:start_x+4]
+
+                # Check homogeneity of the sub-block
+                if self.check_homogeneity(sub_block, threshold):
+                    smooth_blocks.append((start_x, start_y, 4, position))
+                else:
+                    texture_blocks.append((start_x, start_y, 4, position))
+                position+=1
+
+        return smooth_blocks, texture_blocks
+
+
+    def calculate_entropy(sub_block):
+        """
+        Calculate the entropy of a given sub-block.
+
+        Args:
+            sub_block: A numpy array representing the sub-block.
+
+        Returns:
+            entropy: The entropy value of the sub-block.
+        """
+        # Compute the normalized histogram of the sub-block
+        hist, _ = np.histogram(sub_block, bins=256, range=(0, 255), density=True)
+
+        # Compute entropy using the histogram
+        entropy = -np.sum(hist * np.log2(hist + np.finfo(float).eps))
+
+        return entropy
+
+    def calculate_glcm(sub_block):
+        """
+        Calculate the gray-level co-occurrence matrix (GLCM) of a given sub-block.
+
+        Args:
+            sub_block: A numpy array representing the sub-block.
+
+        Returns:
+            glcm: The gray-level co-occurrence matrix (GLCM) of the sub-block.
+        """
+        # Define the offsets for computing GLCM
+        offsets = [(1, 0), (0, 1), (1, 1), (-1, 1)]
+
+        # Initialize GLCM
+        glcm = np.zeros((256, 256))
+
+        # Iterate through each pixel in the sub-block
+        for i in range(sub_block.shape[0]):
+            for j in range(sub_block.shape[1]):
+                # Iterate through each offset
+                for dx, dy in offsets:
+                    x, y = i + dx, j + dy
+                    # Check if the offset pixel is within bounds
+                    if 0 <= x < sub_block.shape[0] and 0 <= y < sub_block.shape[1]:
+                        # Increment the corresponding entry in GLCM
+                        glcm[sub_block[i, j], sub_block[x, y]] += 1
+
+        # Normalize GLCM
+        glcm /= np.sum(glcm)
+
+        return glcm
+
+    def calculate_glcm_entropy(glcm):
+        """
+        Calculate the entropy of a gray-level co-occurrence matrix (GLCM).
+
+        Args:
+            glcm: A numpy array representing the gray-level co-occurrence matrix (GLCM).
+
+        Returns:
+            entropy: The entropy value of the GLCM.
+        """
+        # Flatten GLCM to calculate entropy
+        flat_glcm = glcm.flatten()
+
+        # Calculate entropy using the formula provided
+        entropy = -np.sum(flat_glcm * np.log2(flat_glcm + np.finfo(float).eps))
+
+        return entropy
+
 
     def map_blocks(self):
         # Establish mapping function between original and watermarked sub-blocks
         pass
 
-    def embed_watermark(self):
-        # Embed watermark information using difference expansion and LSB algorithms
-        pass
+    def embed_watermark(self, homogeneous_blocks, smooth_blocks):
+        """
+        Embeds the recovery watermark from homogeneous blocks into smooth blocks and keeps track of the mapping.
+
+        Args:
+            homogeneous_blocks: List of tuples containing information about homogeneous blocks (start_x, start_y, block_size, position).
+            smooth_blocks: List of tuples containing information about smooth blocks (start_x, start_y, block_size).
+
+        Returns:
+            watermarked_image: A copy of the original image with the recovery watermark embedded.
+            mapping: Dictionary containing the mapping between homogeneous blocks and smooth blocks.
+        """
+        watermarked_image = self.image.copy()
+        mapping = {}
+
+        # Iterate over each homogeneous block
+        for hom_block_info in homogeneous_blocks:
+            hom_start_x, hom_start_y, hom_block_size, position = hom_block_info
+            hom_block = self.image[hom_start_y:hom_start_y + hom_block_size, hom_start_x:hom_start_x + hom_block_size]
+
+            # Calculate the average value of the homogeneous block
+            average_value = int(np.mean(hom_block))
+
+            # Convert the average value to an 8-bit binary string
+            binary_string = format(average_value, '08b')
+
+            # Implement BCH encoding (placeholder)
+            bch_encoded = binary_string * 3
+            # Find a suitable smooth block to embed the watermark
+            for smooth_block_info in smooth_blocks:
+                smooth_start_x, smooth_start_y, smooth_block_size,_ = smooth_block_info
+                smooth_block = watermarked_image[smooth_start_y:smooth_start_y + smooth_block_size, smooth_start_x:smooth_start_x + smooth_block_size]
+
+                # Check if the smooth block has enough space to embed the watermark
+                if len(bch_encoded) <= smooth_block.size:
+                    # Embed the watermark into the smooth block
+                    watermarked_block = self.embed_watermark_into_block(smooth_block, bch_encoded)
+
+                    # Update the watermarked image with the embedded watermark
+                    watermarked_image[smooth_start_y:smooth_start_y + smooth_block_size, smooth_start_x:smooth_start_x + smooth_block_size] = watermarked_block
+
+                    # Keep track of the mapping between homogeneous and smooth blocks
+                    mapping[position] = (smooth_start_x, smooth_start_y)
+
+                    break  # Break the loop after embedding the watermark
+
+        return watermarked_image, mapping
+
+    def embed_watermark_into_block(self, block, watermark):
+        """
+        Embeds the watermark into the given block.
+
+        Args:
+            block: A numpy array representing the block.
+            watermark: The watermark to be embedded.
+
+        Returns:
+            watermarked_block: A copy of the block with the watermark embedded.
+        """
+        watermarked_block = block.copy()
+
+        # Embed the watermark into the block (e.g., LSB embedding)
+        # For demonstration purposes, let's just fill the block with a constant value
+        watermark_length = len(watermark)
+        watermark_index = 0
+
+        for i in range(watermarked_block.shape[0]):
+            for j in range(watermarked_block.shape[1]):
+                if watermark_index < watermark_length:
+                    watermark_list = [int(char) if char.isdigit() else 0 for char in watermark]
+                    watermarked_block[i, j] = watermark_list[watermark_index]
+                    watermark_index += 1
+                else:
+                    break
+
+        return watermarked_block
+    
+
+    def embed_watermark_non_homogeneous(self, non_homogeneous_blocks, texture_blocks, image):
+        """
+        Embeds the recovery watermark from non-homogeneous blocks into texture blocks and keeps track of the mapping.
+
+        Args:
+            non_homogeneous_blocks: List of tuples containing information about non-homogeneous blocks (start_x, start_y, block_size, position).
+            texture_blocks: List of tuples containing information about texture blocks (start_x, start_y, block_size).
+
+        Returns:
+            watermarked_image: A copy of the original image with the recovery watermark embedded.
+            mapping: Dictionary containing the mapping between non-homogeneous blocks and texture blocks.
+        """
+        watermarked_image = image.copy()
+        mapping = {}
+
+        # Iterate over each non-homogeneous block
+        for non_hom_block_info in non_homogeneous_blocks:
+            non_hom_start_x, non_hom_start_y, non_hom_block_size, position = non_hom_block_info
+            non_hom_block = self.image[non_hom_start_y:non_hom_start_y + non_hom_block_size, non_hom_start_x:non_hom_start_x + non_hom_block_size]
+
+            # Extract features from the non-homogeneous block (placeholder)
+            feature_info = 'example_feature_info'
+
+            # Find a suitable texture block to embed the watermark
+            for texture_block_info in texture_blocks:
+                texture_start_x, texture_start_y, texture_block_size,_ = texture_block_info
+                texture_block = watermarked_image[texture_start_y:texture_start_y + texture_block_size, texture_start_x:texture_start_x + texture_block_size]
+
+                # Check if the texture block has enough space to embed the watermark
+                if len(feature_info) <= texture_block.size:
+                    # Embed the watermark into the texture block
+                    watermarked_block = self.embed_watermark_into_block(texture_block, feature_info)
+
+                    # Update the watermarked image with the embedded watermark
+                    watermarked_image[texture_start_y:texture_start_y + texture_block_size, texture_start_x:texture_start_x + texture_block_size] = watermarked_block
+
+                    # Keep track of the mapping between non-homogeneous and texture blocks
+                    mapping[position] = (texture_start_x, texture_start_y)
+
+                    break  # Break the loop after embedding the watermark
+
+        return watermarked_image, mapping
+
+
 
     def calculate_invariant_distance(self):
         # Calculate the invariant distance of the embedded recovery watermark image
@@ -227,17 +459,9 @@ class WatermarkEmbeddingAlgorithm:
 
         # Decompose the normalized image based on multiple scales
         homogeneous_blocks, non_homogeneous_blocks = self.decompose_image(self.image)
+        smooth_blocks , texture_blocks = self.divide_and_categorize_blocks(self.image)
 
-        # Print size of homogeneous and non-homogeneous blocks
-        print("Number of homogeneous blocks:", len(homogeneous_blocks))
-        print("Number of non-homogeneous blocks:", len(non_homogeneous_blocks))
-
-
-        # # Generate recovery watermark for each block
-        # recovery_watermark = self.generate_recovery_watermark(homogeneous_blocks, non_homogeneous_blocks)
-
-
-
+        
         # # Draw homogeneous blocks in green and non-homogeneous blocks in red
         # for block in homogeneous_blocks:
         #     x, y, size, _ = block
@@ -252,6 +476,37 @@ class WatermarkEmbeddingAlgorithm:
 
 
         # cv2.imshow('Image View', self.image)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+
+
+
+        # Sort the lists based on position
+        homogeneous_blocks = sorted(homogeneous_blocks, key=lambda x: x[3])
+        non_homogeneous_blocks = sorted(non_homogeneous_blocks, key=lambda x: x[3])
+        smooth_blocks = sorted(smooth_blocks, key=lambda x: x[2])  # Sort by block size
+        texture_blocks = sorted(texture_blocks, key=lambda x: x[2])  # Sort by block size
+
+        # Print size of homogeneous and non-homogeneous blocks
+        print("Number of homogeneous blocks:", len(homogeneous_blocks))
+        print("Number of non-homogeneous blocks:", len(non_homogeneous_blocks))
+        print("Smooth_blocks" , len(smooth_blocks))  
+        print("Texture_blocks" , len(texture_blocks))
+
+         # Embed watermark from homogeneous blocks
+        watermarked_image_homogeneous, mapping_homogeneous = self.embed_watermark(homogeneous_blocks, smooth_blocks)
+
+        # Embed watermark from non-homogeneous blocks
+        watermarked_image_final, mapping_non_homogeneous = self.embed_watermark_non_homogeneous(non_homogeneous_blocks, texture_blocks , watermarked_image_homogeneous)
+
+
+
+        # # Generate recovery watermark for each block
+        # recovery_watermark = self.generate_recovery_watermark(homogeneous_blocks, non_homogeneous_blocks)
+
+        #step 2
+
+        # cv2.imshow('Watermark Image', watermarked_image_final)
         # cv2.waitKey(0)
         # cv2.destroyAllWindows()
 
