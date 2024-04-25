@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import galois
-from pyfinite import ffield
 import random
 
 
@@ -289,57 +288,7 @@ class WatermarkEmbeddingAlgorithm:
         entropy = -np.sum(hist * np.log2(hist + np.finfo(float).eps))
 
         return entropy
-
-    def calculate_glcm(sub_block):
-        """
-        Calculate the gray-level co-occurrence matrix (GLCM) of a given sub-block.
-
-        Args:
-            sub_block: A numpy array representing the sub-block.
-
-        Returns:
-            glcm: The gray-level co-occurrence matrix (GLCM) of the sub-block.
-        """
-        # Define the offsets for computing GLCM
-        offsets = [(1, 0), (0, 1), (1, 1), (-1, 1)]
-
-        # Initialize GLCM
-        glcm = np.zeros((256, 256))
-
-        # Iterate through each pixel in the sub-block
-        for i in range(sub_block.shape[0]):
-            for j in range(sub_block.shape[1]):
-                # Iterate through each offset
-                for dx, dy in offsets:
-                    x, y = i + dx, j + dy
-                    # Check if the offset pixel is within bounds
-                    if 0 <= x < sub_block.shape[0] and 0 <= y < sub_block.shape[1]:
-                        # Increment the corresponding entry in GLCM
-                        glcm[sub_block[i, j], sub_block[x, y]] += 1
-
-        # Normalize GLCM
-        glcm /= np.sum(glcm)
-
-        return glcm
-
-    def calculate_glcm_entropy(glcm):
-        """
-        Calculate the entropy of a gray-level co-occurrence matrix (GLCM).
-
-        Args:
-            glcm: A numpy array representing the gray-level co-occurrence matrix (GLCM).
-
-        Returns:
-            entropy: The entropy value of the GLCM.
-        """
-        # Flatten GLCM to calculate entropy
-        flat_glcm = glcm.flatten()
-
-        # Calculate entropy using the formula provided
-        entropy = -np.sum(flat_glcm * np.log2(flat_glcm + np.finfo(float).eps))
-
-        return entropy
-    
+        
     def modify_embedded_image(self, watermarked_image, homogeneous_blocks, num_blocks_to_modify):
         """
         Modifies the embedded image by changing the values of a random number of homogeneous blocks.
@@ -413,7 +362,7 @@ class WatermarkEmbeddingAlgorithm:
             gf_array = np.array([int(bit) for bit in binary_string], dtype=np.uint8)
 
 
-            mapping[smooth_blocks[index][3]] = position
+            mapping[hom_block_info] = smooth_blocks[index]
 
             # print(average_value)
             # print(binary_string)
@@ -490,41 +439,7 @@ class WatermarkEmbeddingAlgorithm:
 
         return watermarked_image, mapping
 
-    def embed_watermark_into_block(self, watermarked_image, block_info, watermark):
-        """
-        Embeds the watermark into the given block.
 
-        Args:
-            block: A numpy array representing the block.
-            watermark: The watermark to be embedded.
-
-        Returns:
-            watermarked_block: A copy of the block with the watermark embedded.
-        """
-
-        start_x, start_y, block_size, _ = block_info
-
-        watermark_length = len(watermark)
-        watermark_index = 0
-
-        for i in range(start_y, start_y + block_size):
-            for j in range(start_x, start_x + block_size):
-                if watermark_index < watermark_length:
-                    # Convert the pixel value to binary string
-                    # binary_pixel = format(watermarked_image[i, j], '08b')
-
-                    binary_pixel = watermarked_image[i, j]
-
-
-                    # Replace the LSB with the watermark bit
-                    binary_pixel = binary_pixel[:-1]
-
-                    # Convert the modified binary string back to integer
-                    # watermarked_image[i, j] = int(binary_pixel, 2)
-
-                    watermark_index += 1
-                else:
-                    break
 
     
 
@@ -643,17 +558,14 @@ class WatermarkEmbeddingAlgorithm:
 
         modified_image, modified_indices = self.modify_embedded_image(watermarked_image_homogeneous,homogeneous_blocks, 12)
 
-        self.tamper_detection(homogeneous_blocks, non_homogeneous_blocks , modified_image)
+        tampered_blocks =self.tamper_detection(homogeneous_blocks, non_homogeneous_blocks , modified_image)
 
-        cv2.imshow("watermarking" , modified_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # cv2.imshow("watermarking" , modified_image)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
 
         # Embed watermark from non-homogeneous blocks
-        watermarked_image_final, mapping_non_homogeneous = self.embed_watermark_non_homogeneous(non_homogeneous_blocks, texture_blocks , watermarked_image_homogeneous)
-
-
-
+        # watermarked_image_final, mapping_non_homogeneous = self.embed_watermark_non_homogeneous(non_homogeneous_blocks, texture_blocks , watermarked_image_homogeneous)
         # # Generate recovery watermark for each block
         # recovery_watermark = self.generate_recovery_watermark(homogeneous_blocks, non_homogeneous_blocks)
 
@@ -665,8 +577,81 @@ class WatermarkEmbeddingAlgorithm:
 
         # Print the output
         # print("Normalized Image:", self.image)
+        
 
-        return homogeneous_blocks , non_homogeneous_blocks
+        recovered_image=self.image_recovery(modified_image,mapping_homogeneous,tampered_blocks)
+        psnr_value = psnr(recovered_image, self.image)
+        print("PSNR:22222", psnr_value)
+        cv2.imshow("watermarking" , recovered_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    
+    def image_recovery(self, watermarked_image, mapping, tampered_blocks):
+        recovered_image = watermarked_image.copy()
+        tampered_blocks_after_recovery = []
+
+    # Iterate over each tampered block
+        for tam_block_info in tampered_blocks:
+            tam_start_x, tam_start_y, tam_block_size, position = tam_block_info
+            tam_block = watermarked_image[tam_start_y:tam_start_y + tam_block_size, tam_start_x:tam_start_x + tam_block_size]
+
+            # Retrieve the position of the corresponding smooth block
+            smooth_block = mapping[tam_block_info]
+
+            # Extract the recovery watermark bits from the smooth block
+            recovered_bits = self.extract_recovered_bits(recovered_image, smooth_block)
+
+            # Update the tampered block based on the extracted bits
+            tampered_block_after_recovery = self.update_tampered_block(tam_block, recovered_bits)
+
+            # Update the recovered image with the recovered tampered block
+            recovered_image[tam_start_y:tam_start_y + tam_block_size, tam_start_x:tam_start_x + tam_block_size] = tampered_block_after_recovery
+
+        return recovered_image
+
+    def extract_recovered_bits(self, watermarked_image, smooth_position):
+        """
+        Extracts the recovery watermark bits from the smooth block in the watermarked image.
+
+        Args:
+            watermarked_image: Watermarked image with the recovery watermark embedded.
+            smooth_position: Tuple containing information about the smooth block (start_x, start_y, block_size, position).
+
+        Returns:
+            recovered_bits: Array of recovered watermark bits extracted from the smooth block.
+        """
+        recovered_bits = []
+
+        start_x, start_y, block_size, position = smooth_position
+
+        for y in range(start_y, start_y + block_size):
+            for x in range(start_x, start_x + block_size):
+                pixel_value = watermarked_image[y, x]
+                extracted_bit = pixel_value & 1
+                recovered_bits.append(extracted_bit)
+
+        return recovered_bits
+
+    def update_tampered_block(self, tam_block, recovered_bits):
+        """
+        Updates the tampered block based on the recovered watermark bits.
+
+        Args:
+            tam_block: Tampered block from the watermarked image.
+            recovered_bits: Array of recovered watermark bits extracted from the corresponding smooth block.
+
+        Returns:
+            tampered_block_after_recovery: Updated tampered block after applying the recovered bits.
+        """
+        tampered_block_after_recovery = tam_block.copy()
+
+        for i in range(len(recovered_bits)):
+            bit_value = recovered_bits[i]
+            tampered_block_after_recovery.flat[i] &= 0xFE  # Clear the LSB
+            tampered_block_after_recovery.flat[i] |= bit_value  # Update the LSB with the recovered bit
+
+        return tampered_block_after_recovery
 
     def tamper_detection(self , homogeneous_blocks, non_homogeneous_blocks ,  original_image):
         """
@@ -685,7 +670,8 @@ class WatermarkEmbeddingAlgorithm:
         THRESHOLD_HOMOGENEOUS = 10
          
         tampered_image = original_image.copy()
-
+        tampered_blocks=[]
+        
                 
 
 
@@ -702,7 +688,9 @@ class WatermarkEmbeddingAlgorithm:
             max_intensity_diff = maxi_block - mini_block
 
             if max_intensity_diff > THRESHOLD_HOMOGENEOUS+1:  # Define a threshold for homogeneous block variation
-                cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (0, 0, 255), -1)  # Fill red for tampered
+                cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (0, 0, 255), -1)
+                tampered_blocks.append(block_info)
+                  # Fill red for tampered
 
         # for block_info in non_homogeneous_blocks:
         #     start_x, start_y, block_size, _ = block_info
@@ -717,12 +705,13 @@ class WatermarkEmbeddingAlgorithm:
         #         cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (255, 255, 255), -1)  # Fill red for tampered    
         
        
-        cv2.imshow('Tampered Image', tampered_image)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        # cv2.imshow('Tampered Image', tampered_image)
+        # cv2.waitKey(0)
+        # cv2.destroyAllWindows()
+        return tampered_blocks
+    
+        
                 
-
-
 # Usage
 image1 = load_image("edit2.png")
 image2 = load_image("lenna.jpeg")
