@@ -1,9 +1,32 @@
 import cv2
 import numpy as np
-# import pyldpc
+import galois
+from pyfinite import ffield
+import random
+
 
 
 position = 1
+
+def psnr(image1, image2):
+    # Convert images to numpy arrays
+    img1 = np.array(image1)
+    img2 = np.array(image2)
+    
+    # Calculate the mean squared error (MSE)
+    mse = np.mean((img1 - img2) ** 2)
+    
+    # If MSE is zero, PSNR is infinite, return a very large value instead
+    if mse == 0:
+        return float('inf')
+    
+    # Calculate the maximum possible pixel value
+    max_pixel = np.max(img1)
+    
+    # Calculate PSNR using the formula: PSNR = 20 * log10(MAX) - 10 * log10(MSE)
+    psnr_value = 20 * np.log10(max_pixel / np.sqrt(mse))
+    
+    return psnr_value
 
 def quadtree_decomposition(image, threshold=10, min_block_size=4, start_x=0, start_y=0, block_size=None, homogeneous_blocks=[], non_homogeneous_blocks=[]):
     global position
@@ -24,7 +47,6 @@ def quadtree_decomposition(image, threshold=10, min_block_size=4, start_x=0, sta
     Returns:
         homogeneous_blocks, non_homogeneous_blocks: lists containing information about homogeneous and non-homogeneous blocks
     """
-    print("threshold", threshold)
     if block_size is None:
         block_size = min(image.shape[0], image.shape[1])
 
@@ -37,14 +59,11 @@ def quadtree_decomposition(image, threshold=10, min_block_size=4, start_x=0, sta
     else:
         sub_block_size = block_size // 2
 
-        sub_images = [
-            image[start_y:start_y + sub_block_size, start_x:start_x + sub_block_size],
-            image[start_y:start_y + sub_block_size, start_x + sub_block_size:start_x + 2 * sub_block_size],
-            image[start_y + sub_block_size:start_y + 2 * sub_block_size, start_x:start_x + sub_block_size],
-            image[start_y + sub_block_size:start_y + 2 * sub_block_size, start_x + sub_block_size:start_x + 2 * sub_block_size]
-        ]
+        # Extract the sub-image corresponding to the entire block
+        entire_block_image = image[start_y:start_y + block_size, start_x:start_x + block_size]
 
-        max_intensity_diff = max(sub_image.max() - sub_image.min() for sub_image in sub_images)
+        # Calculate the maximum intensity difference within the entire block
+        max_intensity_diff = entire_block_image.max() - entire_block_image.min()
 
         if max_intensity_diff > threshold:
             quadtree_decomposition(image, threshold, min_block_size, start_x, start_y, sub_block_size, homogeneous_blocks, non_homogeneous_blocks)
@@ -72,15 +91,21 @@ def load_image(image_path):
 
 
 class WatermarkEmbeddingAlgorithm:
-    def __init__(self, image):
+    def __init__(self, image ,image1):
         image = cv2.resize(image, (256, 256))
+        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        image1 = cv2.resize(image1 , (256,256))
+        gray_image1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
+
         # rotation_angle = 0.10  # 45 degrees in radians
         # translation = (0, 0)  # Translation of (20, -10) pixels
         # scaling_factor = 1.1  # Scaling factor of 1.5
         # self.image = image
         # Call the normalize_image method with the example values
         # image = self.normalize_image(rotation_angle, translation, scaling_factor)
-        self.image = image
+        self.image = gray_image
+        self.image1 = gray_image1
 
     def normalize_image(self, rotation_angle, translation, scaling_factor):
         """
@@ -238,7 +263,7 @@ class WatermarkEmbeddingAlgorithm:
                 sub_block = image[start_y:start_y+4, start_x:start_x+4]
 
                 # Check homogeneity of the sub-block
-                if self.check_homogeneity(sub_block, threshold):
+                if self.calculate_entropy(sub_block)<=3:
                     smooth_blocks.append((start_x, start_y, 4, position))
                 else:
                     texture_blocks.append((start_x, start_y, 4, position))
@@ -247,7 +272,7 @@ class WatermarkEmbeddingAlgorithm:
         return smooth_blocks, texture_blocks
 
 
-    def calculate_entropy(sub_block):
+    def calculate_entropy(self , sub_block):
         """
         Calculate the entropy of a given sub-block.
 
@@ -314,6 +339,42 @@ class WatermarkEmbeddingAlgorithm:
         entropy = -np.sum(flat_glcm * np.log2(flat_glcm + np.finfo(float).eps))
 
         return entropy
+    
+    def modify_embedded_image(self, watermarked_image, homogeneous_blocks, num_blocks_to_modify):
+        """
+        Modifies the embedded image by changing the values of a random number of homogeneous blocks.
+
+        Args:
+            watermarked_image: The watermarked image with the recovery watermark embedded.
+            homogeneous_blocks: List of tuples containing information about homogeneous blocks (start_x, start_y, block_size, position).
+            num_blocks_to_modify: Number of homogeneous blocks to modify.
+
+        Returns:
+            modified_image: The modified watermarked image.
+            modified_indices: List of indices of the modified homogeneous blocks.
+        """
+        modified_image = watermarked_image.copy()
+        modified_indices = []
+
+        # Shuffle the homogeneous blocks list to randomly select blocks
+        random.shuffle(homogeneous_blocks)
+
+        # Select a random number of blocks to modify
+        blocks_to_modify = random.sample(homogeneous_blocks, num_blocks_to_modify)
+
+        for block_info in blocks_to_modify:
+            start_x, start_y, block_size, _ = block_info
+
+            # Generate a random value to replace the original block
+            new_value = random.randint(180, 255)
+
+            # Modify the block in the image
+            modified_image[start_y:start_y + block_size, start_x:start_x + block_size] = new_value
+
+            # Store the index of the modified block
+            modified_indices.append(homogeneous_blocks.index(block_info))
+
+        return modified_image, modified_indices
 
 
     def map_blocks(self):
@@ -345,36 +406,85 @@ class WatermarkEmbeddingAlgorithm:
             # Calculate the average value of the homogeneous block
             average_value = int(np.mean(hom_block))
 
-            # Convert the average value to an 8-bit binary string
+
+            # # Convert the average value to an 8-bit binary string
             binary_string = format(average_value & 0xFF, '08b')
+           
+            gf_array = np.array([int(bit) for bit in binary_string], dtype=np.uint8)
 
-            data_bits = binary_string[:8]
-            parity_bits = binary_string[8:]
 
-            # Define LDPC code parameters
-            n = 15  # Length of codeword
-            k = 8   # Number of message bits
-            d_v = 7  # Variable node degree
-            d_c = 3  # Check node degree
+            mapping[smooth_blocks[index][3]] = position
 
-            # # Generate LDPC parity-check matrix
-            # H, _, _ = pyldpc.make_ldpc(n, d_v, d_c, systematic=True, sparse=True)
+            # print(average_value)
+            # print(binary_string)
 
-            # # Create LDPC code object
-            # ldpc_code = pyldpc.code(H)
+            # Create a BCH code object.
+            bch = galois.BCH(15, 11)
+            encoded_integer = bch.encode(gf_array)
 
-            # # Encode data bits using LDPC encoding
-            # encoded_data = ldpc_code.encode(data_bits.astype(int))
+            # encoded_binary_string = format(encoded_integer, '015b')
 
-            # Combine data and parity bits into a single string
-            # watermark_bits = ''.join(str(bit) for bit in encoded_data) + parity_bits
+            # gf = ffield.FField(15)
 
-            # Update mapping dictionary
-            mapping[position] = smooth_blocks[index][3]
+            # encoded_data = gf.EncodeBCH(average_value, 15 ,11)
+            # print("code" , encoded_integer) 
 
-            # Embed the watermark into the smooth block
-            self.embed_watermark_into_block(watermarked_image,smooth_blocks[index], binary_string)
-            
+            # encoded_integer = bch.decode(encoded_integer)
+
+            # print("decode" , encoded_integer)
+
+            # Define constants for LSB embedding
+            LSB_MASK = 0xFE  # Mask to clear the LSB of a pixel value
+            LSB_COUNT = 12   # Number of LSBs to embed
+
+            # water embeding 
+            start_x , start_y , block_size , s_position = smooth_blocks[index]
+            encoded_bit_index = 0
+           
+            for y in range(start_y, start_y + block_size):
+                for x in range(start_x, start_x + block_size):
+                    # Get the pixel value from the watermarked image
+                    pixel_value = watermarked_image[y, x]
+
+                    # print("pixel_value" , pixel_value)
+
+                    # Clear the LSB to make room for the encoded bit
+                    modified_pixel_value = pixel_value & LSB_MASK
+
+                    # print("modified_pixel_value",modified_pixel_value)
+
+                    encoded_bit = int(encoded_integer[encoded_bit_index] & 1)
+
+                    # print("encoded_bit",type(encoded_bit))
+
+                    modified_pixel_value |= encoded_bit
+
+                    # print("modified_pixel_value" , modified_pixel_value)
+
+
+
+                    # # Get the LSB of the encoded integer
+                    # encoded_bit = (encoded_integer >> encoded_bit_index) & 1
+
+                    # print("encoded_bit" , encoded_bit)
+
+                    # # Embed the LSB of the encoded integer into the pixel
+                    # modified_pixel_value |= encoded_bit
+
+                    # print("modified_pixel_value" , modified_pixel_value)
+
+                    # Update the pixel value in the watermarked image
+                    watermarked_image[y, x] = modified_pixel_value
+
+                    # Increment the index to move to the next bit of the encoded integer
+                    encoded_bit_index += 1
+
+                    # If all LSBs have been embedded, break out of the loop
+                    if encoded_bit_index >= LSB_COUNT:
+                        break
+                if encoded_bit_index >= LSB_COUNT:
+                    break
+
             index+=1
 
 
@@ -521,6 +631,24 @@ class WatermarkEmbeddingAlgorithm:
          # Embed watermark from homogeneous blocks
         watermarked_image_homogeneous, mapping_homogeneous = self.embed_watermark(homogeneous_blocks, smooth_blocks)
 
+        psnr_value = psnr(watermarked_image_homogeneous, self.image)
+        print("PSNR:", psnr_value)
+
+        # self.tamper_detection(homogeneous_blocks, non_homogeneous_blocks , self.image1)
+
+        
+        # cv2.imwrite("watermarked_image_homogeneous.png", watermarked_image_homogeneous)
+
+        print("Watermarked image saved successfully.")
+
+        modified_image, modified_indices = self.modify_embedded_image(watermarked_image_homogeneous,homogeneous_blocks, 12)
+
+        self.tamper_detection(homogeneous_blocks, non_homogeneous_blocks , modified_image)
+
+        cv2.imshow("watermarking" , modified_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
         # Embed watermark from non-homogeneous blocks
         watermarked_image_final, mapping_non_homogeneous = self.embed_watermark_non_homogeneous(non_homogeneous_blocks, texture_blocks , watermarked_image_homogeneous)
 
@@ -536,7 +664,7 @@ class WatermarkEmbeddingAlgorithm:
         # cv2.destroyAllWindows()
 
         # Print the output
-        print("Normalized Image:", self.image)
+        # print("Normalized Image:", self.image)
 
         return homogeneous_blocks , non_homogeneous_blocks
 
@@ -573,21 +701,20 @@ class WatermarkEmbeddingAlgorithm:
 
             max_intensity_diff = maxi_block - mini_block
 
-            if max_intensity_diff > THRESHOLD_HOMOGENEOUS:  # Define a threshold for homogeneous block variation
+            if max_intensity_diff > THRESHOLD_HOMOGENEOUS+1:  # Define a threshold for homogeneous block variation
                 cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (0, 0, 255), -1)  # Fill red for tampered
 
-    
-        for block_info in non_homogeneous_blocks:
-            start_x, start_y, block_size, _ = block_info
-            block = original_image[start_y:start_y + block_size, start_x:start_x + block_size]
+        # for block_info in non_homogeneous_blocks:
+        #     start_x, start_y, block_size, _ = block_info
+        #     block = original_image[start_y:start_y + block_size, start_x:start_x + block_size]
             
-            maxi_block = max(block.flatten())  # Find maximum intensity in the block
-            mini_block = min(block.flatten())  # Find minimum intensity in the block
+        #     maxi_block = max(block.flatten())  # Find maximum intensity in the block
+        #     mini_block = min(block.flatten())  # Find minimum intensity in the block
 
-            max_intensity_diff = maxi_block - mini_block
+        #     max_intensity_diff = maxi_block - mini_block
 
-            if max_intensity_diff <= THRESHOLD_HOMOGENEOUS:  # Define a threshold for homogeneous block variation
-                cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (0, 0, 255), -1)  # Fill red for tampered    
+        #     if max_intensity_diff <= THRESHOLD_HOMOGENEOUS:  # Define a threshold for homogeneous block variation
+        #         cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (255, 255, 255), -1)  # Fill red for tampered    
         
        
         cv2.imshow('Tampered Image', tampered_image)
@@ -597,10 +724,10 @@ class WatermarkEmbeddingAlgorithm:
 
 
 # Usage
-image1 = load_image("edit.png")
+image1 = load_image("edit2.png")
 image2 = load_image("lenna.jpeg")
-watermark_algorithm = WatermarkEmbeddingAlgorithm(image2)
+watermark_algorithm = WatermarkEmbeddingAlgorithm(image2,image1)
 homogeneous_blocks , non_homogeneous_blocks = watermark_algorithm.embed_watermark_image()
 image2 = cv2.resize(image2, (256, 256))
 image1 = cv2.resize(image1, (256, 256))
-watermark_algorithm.tamper_detection(homogeneous_blocks , non_homogeneous_blocks , image1)
+# watermark_algorithm.tamper_detection(homogeneous_blocks , non_homogeneous_blocks , image1)
