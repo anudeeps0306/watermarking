@@ -325,11 +325,6 @@ class WatermarkEmbeddingAlgorithm:
 
         return modified_image, modified_indices
 
-
-    def map_blocks(self):
-        # Establish mapping function between original and watermarked sub-blocks
-        pass
-
     def embed_watermark(self, homogeneous_blocks, smooth_blocks):
         """
         Embeds the recovery watermark from homogeneous blocks into smooth blocks and keeps track of the mapping.
@@ -505,6 +500,8 @@ class WatermarkEmbeddingAlgorithm:
 
         # # Call the normalize_image method with the example values
         # normalized_image = self.normalize_image(rotation_angle, translation, scaling_factor)
+
+        C = 25  # Threshold for homogeneous block variation
         
 
         # Decompose the normalized image based on multiple scales
@@ -546,6 +543,7 @@ class WatermarkEmbeddingAlgorithm:
          # Embed watermark from homogeneous blocks
         watermarked_image_homogeneous, mapping_homogeneous = self.embed_watermark(homogeneous_blocks, smooth_blocks)
 
+        image_recover = watermarked_image_homogeneous.copy()
         psnr_value = psnr(watermarked_image_homogeneous, self.image)
         print("PSNR:", psnr_value)
 
@@ -581,8 +579,15 @@ class WatermarkEmbeddingAlgorithm:
 
         recovered_image=self.image_recovery(modified_image,mapping_homogeneous,tampered_blocks)
         psnr_value = psnr(recovered_image, self.image)
-        print("PSNR:22222", psnr_value)
-        cv2.imshow("watermarking" , recovered_image)
+        
+        
+        
+        
+        print("PSNR:Recovered_Image", psnr_value)
+
+
+
+        cv2.imshow("watermarking" , image_recover)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
 
@@ -590,6 +595,8 @@ class WatermarkEmbeddingAlgorithm:
     def image_recovery(self, watermarked_image, mapping, tampered_blocks):
         recovered_image = watermarked_image.copy()
         tampered_blocks_after_recovery = []
+
+        print(tampered_blocks)
 
     # Iterate over each tampered block
         for tam_block_info in tampered_blocks:
@@ -599,15 +606,58 @@ class WatermarkEmbeddingAlgorithm:
             # Retrieve the position of the corresponding smooth block
             smooth_block = mapping[tam_block_info]
 
+
+            print(smooth_block)
+
             # Extract the recovery watermark bits from the smooth block
             recovered_bits = self.extract_recovered_bits(recovered_image, smooth_block)
 
-            # Update the tampered block based on the extracted bits
-            tampered_block_after_recovery = self.update_tampered_block(tam_block, recovered_bits)
+
+            #get irst 12 bits , and use bch(15,11) to decode the bits 
+            gf_array = np.array([int(bit) for bit in recovered_bits[:12]], dtype=np.uint8)
+            bch = galois.BCH(15, 11)
+
+            encoded_integer = bch.decode(gf_array)
+
+            print("encoded_integer" , encoded_integer)
+
+            encoded_integer_int = [int(x) for x in encoded_integer]
+
+            binary_string = ''.join(map(str, encoded_integer_int))
+
+            # Convert the binary string to an integer
+            encoded_integer_int = int(binary_string, 2)
+
+
+            print("Int encoded_integer" , encoded_integer_int)
+
+
+             # Update the tampered block based on the extracted bits
+            tampered_block_after_recovery = recovered_image.copy()
+
+            count = 0
+
+            # for y in range(tam_start_y, tam_start_y + tam_block_size):
+            #     for x in range(tam_start_x, tam_start_x + tam_block_size):
+            #         if(count==8):
+            #             break
+            #         bit_value = int(encoded_integer[count] & 1)
+        
+            #         tampered_block_after_recovery[y, x] &= 0xFE  # Clear the LSB
+            #         tampered_block_after_recovery[y, x] |= bit_value  # Update the LSB with the recovered bit
+            #         count+=1
+            #         break
+
+            # for i in range(len(encoded_integer)):
+            #     bit_value = (encoded_integer[i]) & 1
+            #     tampered_block_after_recovery.flat[i] &= 0xFE  # Clear the LSB
+            #     tampered_block_after_recovery.flat[i] |= bit_value  # Update the LSB with the recovered bit
 
             # Update the recovered image with the recovered tampered block
-            recovered_image[tam_start_y:tam_start_y + tam_block_size, tam_start_x:tam_start_x + tam_block_size] = tampered_block_after_recovery
+            encoded_integer_int = int(binary_string, 2)
+            recovered_image[tam_start_y:tam_start_y + tam_block_size, tam_start_x:tam_start_x + tam_block_size] = encoded_integer_int
 
+    
         return recovered_image
 
     def extract_recovered_bits(self, watermarked_image, smooth_position):
@@ -624,13 +674,12 @@ class WatermarkEmbeddingAlgorithm:
         recovered_bits = []
 
         start_x, start_y, block_size, position = smooth_position
-
+        print("start_x",start_x)
         for y in range(start_y, start_y + block_size):
             for x in range(start_x, start_x + block_size):
                 pixel_value = watermarked_image[y, x]
                 extracted_bit = pixel_value & 1
                 recovered_bits.append(extracted_bit)
-
         return recovered_bits
 
     def update_tampered_block(self, tam_block, recovered_bits):
@@ -687,8 +736,11 @@ class WatermarkEmbeddingAlgorithm:
 
             max_intensity_diff = maxi_block - mini_block
 
-            if max_intensity_diff > THRESHOLD_HOMOGENEOUS+1:  # Define a threshold for homogeneous block variation
+            print(max_intensity_diff)
+            if max_intensity_diff > THRESHOLD_HOMOGENEOUS:  # Define a threshold for homogeneous block variation
+                print(block_info)
                 cv2.rectangle(tampered_image, (start_x, start_y), (start_x + block_size, start_y + block_size), (0, 0, 255), -1)
+                print(block_info)
                 tampered_blocks.append(block_info)
                   # Fill red for tampered
 
